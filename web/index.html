@@ -1,0 +1,206 @@
+<title>Trick Wall TER06</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: wooden board on the left, control panel on the right; stacks on phones. */
+:root{
+  --bg:#f3f1ee; --fg:#22252b; --muted:#666b76; --panel:#e6e3df; --line:#c9c5bf;
+  --btn:#2f3a55; --btn-fg:#f2f4fa; --btn-hi:#4f86e6; --accent:#c4591c;
+  --font:"Space Grotesk",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#16181d; --fg:#e8eaf0; --muted:#9aa0ae; --panel:#222630; --line:#363b48;
+  --btn:#2f3a55; --btn-fg:#f2f4fa; --btn-hi:#5b93f0; --accent:#f08a4b; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#16181d; --fg:#e8eaf0; --muted:#9aa0ae; --panel:#222630; --line:#363b48;
+  --btn:#2f3a55; --btn-fg:#f2f4fa; --btn-hi:#5b93f0; --accent:#f08a4b; color-scheme:dark}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);
+  padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;justify-content:center;max-width:1100px;margin:0 auto}
+.board{flex:0 1 520px;min-width:0}
+canvas{display:block;width:100%;height:auto;border-radius:6px;background:#cda978}
+.panel{flex:1 1 300px;min-width:0;max-width:420px;display:flex;flex-direction:column;gap:14px}
+h1{font-size:1.4rem;margin:0;letter-spacing:.01em}
+.sub{color:var(--muted);font-size:.85rem;margin-top:4px}
+.code{display:flex;gap:10px}
+.code i{width:30px;height:30px;border-radius:50%;border:3px solid var(--c);box-sizing:border-box;background:transparent}
+.code i.on{background:var(--c)}
+.btns{display:grid;gap:8px}
+.btns button{font:inherit;font-size:1rem;text-align:left;padding:13px 14px;border-radius:8px;border:1px solid var(--line);
+  background:var(--btn);color:var(--btn-fg);cursor:pointer}
+.btns button.hit{background:var(--btn-hi)}
+.btns button:focus-visible,.tog button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.btns kbd{font-family:var(--mono);opacity:.7;margin-right:6px}
+.tog{display:flex;flex-wrap:wrap;gap:6px}
+.tog button{font:inherit;font-size:.8rem;padding:6px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
+.stats{font-family:var(--mono);font-size:.78rem;color:var(--muted);line-height:1.6}
+.log{font-family:var(--mono);font-size:.78rem;background:#1b1e26;color:#e8eaf0;border-radius:8px;padding:10px 12px;min-height:7.5em;line-height:1.5}
+.log div{overflow-wrap:anywhere}
+.help{font-size:.82rem;color:var(--muted);line-height:1.5}
+.help b{color:var(--fg)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=Space+Grotesk:wght@500;700&display=swap">
+
+<div class="wrap">
+  <div class="board"><canvas id="cv" width="684" height="1040" aria-label="Maze board"></canvas></div>
+  <div class="panel">
+    <div><h1>The Trick Wall</h1><div class="sub">TER06. Steer the ball through green, red, yellow, blue, then out the exit.</div></div>
+    <div class="code" id="code"></div>
+    <div class="btns" id="btns"></div>
+    <div class="tog" id="tog"></div>
+    <div class="stats" id="stats"></div>
+    <div class="log" id="log" aria-live="polite"></div>
+    <div class="help"><b>How it works.</b> You can't touch the ball. Each button secretly does push left, push right, open floor or lift, and the mapping reshuffles after every run. A press only works if the ball sits in a cell with the matching gate. Keys 1-4 or Q W E R. Orange = floor gate, blue = push gate, grey-blue = roof gate (can't reach a resting ball).</div>
+  </div>
+</div>
+
+<script>
+// ---------------- maze data (from the TER06 description) ----------------
+const COLS=20,ROWS=20,CW=39.75,CH=60,X0=30,Y0=50;
+const H=["11111111111111111111","00000100011001010001","00000011000110101110","00000010110011010001","10000100101110010010","00001011011010001001","10010111010011000100","00000000001101100011","01111100100010100101","01010010010101000010","01001011100010110100","00110111111101101011","00000110010001000110","01011110000001010010","10010101001010101001","01011001111101000110","10100010100110100100","01001000101100011011","10001101011000100111","00100111100110011110","11111111111111111111"];
+const V=["11111111111111111111","00000011111100000001","00000000000111101010","00000001111010011101","00001011000010101010","00011110111000011100","01100001000001111111","00010011110010001100","11111010100111011000","01000111011010100100","00110001110011010001","11100110101110101011","01011010011111000100","10000001101000011110","01010100000110101110","00101011111110110000","01010110110110111100","10111011010001001101","11011110101101100000","00000100010010010000","11111111111111111111"];
+const ENTRY=[9,18];
+const CPS=[[6,14],[13,14],[5,9],[12,9],[10,4],[8,1]];
+const HOLES=[[7,0],[10,0],[17,0]];
+const DOTS=[[16,17],[2,16],[11,16],[14,14],[18,12],[11,11],[1,9],[14,7],[7,6],[17,6],[15,3],[2,1]];
+const GT=`F1 f f - 10 18|F2 f f - 4 8|F3 f f - 5 6|F4 f f - 14 11|F5 f f - 8 11|F6 f f - 8 3|F7 f f - 2 11|F8 f f - 17 8|F9 f f - 19 7|F10 f f - 10 7|F11 f f - 6 13|F12 f f - 12 6|F13 f f - 16 2|F14 f f - 9 15|F15 f f - 6 2|F16 f f - 15 13|F17 f f - 6 16|F18 f f - 0 4|F19 f f - 12 3|F20 f f - 17 12|<21 p r L 7 18|<22 p s L 8 17|>23 p r R 7 14|<24 p s L 10 14|<25 p s L 13 12|<26 p s L 2 8|<27 p r L 5 11|<28 p s L 10 11|<29 p s L 12 8|<30 p s L 17 10|>31 p r R 6 5|>32 p s R 9 6|>33 p s R 13 7|>34 p s R 16 5|>35 p s R 0 0|<36 p r L 5 0|<37 p s L 10 1|<38 p s L 14 2|<39 p s L 19 3`;
+const GATES=GT.split("|").map(s=>{const [id,t,m,p,c,r]=s.split(" ");return{id,type:t==="f"?"floor":"push",mount:m==="f"?"floor":m==="s"?"side":"roof",push:p==="-"?null:p,col:+c,row:+r}});
+// dot colours + real exit (the CAD leaves these open; picked by search so the maze is winnable)
+const DOT_CELLS=[[18,12],[14,7],[17,6],[2,1]], EXIT=[10,0];
+const COLOURS=["green","red","yellow","blue"];
+const RGB={green:"#3cd25a",red:"#eb4646",yellow:"#f0d23c",blue:"#468cff"};
+const DRIFT_P=0.2;
+const key=(c,r)=>c+","+r;
+const eq=(a,b)=>a[0]===b[0]&&a[1]===b[1];
+const inList=(l,c)=>l.some(x=>eq(x,c));
+
+// ---------------- rules ----------------
+class Maze{
+  constructor(roofWorks){this.roof=roofWorks;this.slots={};
+    for(const g of GATES){const k=key(g.col,g.row);const s=this.slots[k]=this.slots[k]||{};
+      if(g.type==="floor")s.floor=g;else if(g.mount==="roof"&&!roofWorks)s["dead"+g.push]=g;else s[g.push]=g;}}
+  hasFloor(c,r){return r===0||H[r][c]==="1"}
+  wall(c,r,d){return V[d>0?c+1:c][r]==="1"}
+  settle(c,r,path,drifts=2){
+    if(this.hasFloor(c,r))return[[1,path,inList(HOLES,[c,r])?"hole":"rest"]];
+    const sides=drifts>0?[-1,1].filter(d=>!this.wall(c,r,d)):[];
+    const out=[];const pf=1-DRIFT_P*sides.length;
+    for(const o of this.settle(c,r-1,path.concat([[c,r-1,"fall"]]),drifts))out.push([pf*o[0],o[1],o[2]]);
+    for(const d of sides)for(const o of this.settle(c+d,r,path.concat([[c+d,r,"drift"]]),drifts-1))out.push([DRIFT_P*o[0],o[1],o[2]]);
+    return out;}
+  wobbleOptions(cell){const[c,r]=cell;const o=[];
+    for(const d of[-1,1])if(!this.wall(c,r,d))o.push(this.settle(c+d,r,[[c,r,"start"],[c+d,r,"roll"]]));return o;}
+  act(cell,a){const[c,r]=cell;const s=this.slots[key(c,r)]||{};
+    if(a==="FLOOR"&&s.floor)return[s.floor,this.settle(c,r-1,[[c,r,"start"],[c,r-1,"fall"]])];
+    if(a==="LEFT"||a==="RIGHT"){const k=a==="LEFT"?"L":"R",d=a==="LEFT"?-1:1;
+      if(s[k]&&!this.wall(c,r,d))return[s[k],this.settle(c+d,r,[[c,r,"start"],[c+d,r,"push"]])];}
+    return null;}
+}
+
+// ---------------- geometry for drawing ----------------
+const gl=g=>g.type==="floor"?((g.col===0||g.col===19)?28.75:30.75):g.mount==="side"?((g.col===0||g.col===19)?49:51):30.75;
+function gateSeg(g,th){const c=g.col,r=g.row,L=gl(g);let hx,hy,v;const cs=Math.cos(th),sn=Math.sin(th);
+  if(g.type==="floor"){hx=X0+c*CW+3;hy=Y0+r*CH;v=[cs,-sn]}
+  else if(g.mount==="side"){hy=Y0+(r+1)*CH-4.5;
+    if(g.push==="L"){hx=X0+(c+1)*CW;v=[-sn,-cs]}else{hx=X0+c*CW;v=[sn,-cs]}}
+  else{hy=Y0+(r+1)*CH;
+    if(g.push==="L"){hx=X0+c*CW+4.5;v=[cs,-sn]}else{hx=X0+(c+1)*CW-4.5;v=[-cs,-sn]}}
+  return[[hx,hy],[hx+v[0]*L,hy+v[1]*L]]}
+const gateWall=g=>g.type==="floor"?"h"+g.row+","+g.col:g.mount==="roof"?"h"+(g.row+1)+","+g.col:"v"+(g.push==="L"?g.col+1:g.col)+","+g.row;
+const SKIP=new Set(GATES.map(gateWall));
+const ballXY=(c,r)=>[X0+(c+.5)*CW,Y0+r*CH+9];
+
+// ---------------- game ----------------
+const NAMES={LEFT:"PUSH LEFT",RIGHT:"PUSH RIGHT",FLOOR:"OPEN FLOOR",LIFT:"LIFT"};
+const FALL_T=.11,MOVE_T=.22,GATE_T=.15;
+const WOB={0:null,1:[2,4],2:[.8,1.8]},WOBN=["off","normal","wild"];
+const G={maze:new Maze(false),fixed:false,wobble:1,reveal:false,stats:{runs:0,wins:0,presses:0,drains:0},log:[],gates:{},flash:[0,0,0,0]};
+const rnd=(a,b)=>a+Math.random()*(b-a);
+function say(t,col){G.log.unshift([t,col]);G.log.length=Math.min(G.log.length,6);renderLog()}
+function choose(outs){let r=Math.random(),a=0;for(const o of outs){a+=o[0];if(r<=a)return o}return outs[outs.length-1]}
+function shuffle(){const a=["LEFT","RIGHT","FLOOR","LIFT"];for(let i=3;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}G.map=a}
+function newRun(first){if(first||!G.fixed)shuffle();G.progress=0;G.cp=null;G.collected=[];entryDrop();say(G.fixed?"New run.":"New run. Buttons reshuffled.","#7fb2ff");renderBtns();renderCode()}
+function startCell(){return G.cp||[ENTRY[0],ENTRY[1]+1]}
+function release(cell){return G.maze.settle(cell[0],cell[1],[[cell[0],cell[1],"start"]])}
+function entryDrop(){const c=[ENTRY[0],ENTRY[1]+1];G.cell=c;[G.x,G.y]=ballXY(...c);travel(choose(release(c)))}
+function travel(o,gate){G.queue=o[1].slice(1);G.term=o[2];G.leg=null;G.moving=true;G.gateWait=0;
+  if(gate){G.gates[gate.id]={t:0,closing:false,hold:0};G.gateWait=GATE_T*.8}G.wt=nextWob()}
+function nextWob(){const w=WOB[G.wobble];return w?rnd(w[0],w[1]):null}
+function touch(cell){
+  if(inList(CPS,cell)){if(!G.cp||!eq(G.cp,cell))say("Checkpoint "+(CPS.findIndex(x=>eq(x,cell))+1)+" passed","#8fd8ff");G.cp=cell}
+  const i=DOT_CELLS.findIndex(x=>eq(x,cell));
+  if(i>=0){if(i===G.progress){G.progress++;G.collected.push(key(...cell));say(COLOURS[i].toUpperCase()+" dot collected ("+G.progress+"/4)",RGB[COLOURS[i]]);renderCode()}
+    else if(i>G.progress){if(G.progress)say(COLOURS[i].toUpperCase()+" out of order. Code reset.","#ff9a60");G.progress=0;G.collected=[];renderCode()}}}
+function lift(auto){const c=startCell();G.cell=c;[G.x,G.y]=ballXY(...c);
+  if(!G.cp){G.progress=0;G.collected=[];renderCode()}
+  if(!auto)say("Lift: ball carried back "+(G.cp?"to the checkpoint.":"to the start."),"#b8b8ff");
+  travel(choose(release(c)))}
+function onHole(cell){
+  if(eq(cell,EXIT)){G.stats.runs++;if(G.progress===4){G.stats.wins++;say("EXIT! Code complete. YOU WIN!","#6dff8c")}else say("Out of the exit, but the code was incomplete.","#ff9a60");newRun()}
+  else{G.stats.drains++;say("Drain! The lift returns the ball to the last checkpoint.","#ff7878");lift(true)}
+  renderStats()}
+function arrive(){G.moving=false;[G.x,G.y]=ballXY(...G.cell);if(G.term==="hole")onHole(G.cell);else G.wt=nextWob()}
+function doWobble(){const o=G.maze.wobbleOptions(G.cell);if(!o.length){G.wt=nextWob();return}travel(choose(o[Math.floor(Math.random()*o.length)]))}
+function update(dt){
+  for(let i=0;i<4;i++)G.flash[i]=Math.max(0,G.flash[i]-dt);
+  for(const id in G.gates){const a=G.gates[id];
+    if(!a.closing){a.t=Math.min(1,a.t+dt/GATE_T);if(!G.moving&&a.t>=1){a.hold+=dt;if(a.hold>.1)a.closing=true}}
+    else{a.t-=dt/GATE_T;if(a.t<=0)delete G.gates[id]}}
+  if(G.moving){G.gateWait=Math.max(0,G.gateWait-dt);if(G.gateWait>0)return;
+    if(!G.leg){if(!G.queue.length){arrive();return}const[c,r,k]=G.queue.shift();const[tx,ty]=ballXY(c,r);G.leg={x0:G.x,y0:G.y,x1:tx,y1:ty,T:k==="fall"?FALL_T:MOVE_T,c:[c,r],t:0}}
+    const L=G.leg;L.t+=dt;const u=Math.min(1,L.t/L.T);G.x=L.x0+(L.x1-L.x0)*u;G.y=L.y0+(L.y1-L.y0)*u;
+    if(u>=1){G.cell=L.c;touch(L.c);G.leg=null}}
+  else if(G.wt!==null){G.wt-=dt;if(G.wt<=0){doWobble();if(!G.moving)G.wt=nextWob()}}}
+function press(i){if(G.moving)return;G.stats.presses++;G.flash[i]=.2;renderBtns();renderStats();const a=G.map[i];
+  if(a==="LIFT"){lift();return}
+  const res=G.maze.act(G.cell,a);
+  if(!res){say("Button "+(i+1)+": nothing happened.","#9aa0ae");return}
+  travel(choose(res[1]),res[0]);say("Button "+(i+1)+": gate "+res[0].id+" moved!","#ffe08a")}
+
+// ---------------- drawing ----------------
+const cv=document.getElementById("cv"),ctx=cv.getContext("2d");const S=cv.width/855;
+const P=(x,y)=>[x*S,(1300-y)*S];
+function line(a,b,w,col){ctx.strokeStyle=col;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(...P(...a));ctx.lineTo(...P(...b));ctx.stroke()}
+function circ(x,y,r,fill,stroke,w){const[px,py]=P(x,y);ctx.beginPath();ctx.arc(px,py,r*S,0,7);if(fill){ctx.fillStyle=fill;ctx.fill()}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=w;ctx.stroke()}}
+const cc=(c,r)=>[X0+(c+.5)*CW,Y0+(r+.5)*CH];
+function draw(){
+  ctx.fillStyle="#cda978";ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.lineCap="round";
+  for(let k=0;k<=COLS;k++)line([X0+k*CW,Y0],[X0+k*CW,Y0+ROWS*CH],1,"#bf9c6a");
+  for(let k=0;k<=ROWS;k++)line([X0,Y0+k*CH],[X0+COLS*CW,Y0+k*CH],1,"#bf9c6a");
+  DOTS.forEach(c=>{const i=DOT_CELLS.findIndex(x=>eq(x,c));const[x,y]=cc(...c);
+    if(i<0)circ(x,y,14,null,"#8d6f48",1.5);else{const col=RGB[COLOURS[i]],done=G.collected.includes(key(...c));
+      if(done)circ(x,y,16,col);else{circ(x,y,14,col+"55",col,4)}}});
+  CPS.forEach(c=>{const[x,y]=cc(...c);const on=G.cp&&eq(G.cp,c);circ(x,y,11,null,on?"#58c8ff":"#3c78aa",2.5);circ(x,y,4,on?"#58c8ff":"#3c78aa")});
+  {const[x,y]=cc(...ENTRY);circ(x,y,14,null,"#333",3);ctx.fillStyle="#333";ctx.font=(11*S*1.6)+"px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText("IN",...P(x,y))}
+  HOLES.forEach(c=>{const[x,y]=cc(...c);circ(x,y,14,"#0e0e12");if(G.reveal)circ(x,y,17,null,eq(c,EXIT)?"#3cff78":"#ff4646",3)});
+  const w=Math.max(2.5,4*S*1.0);
+  for(let k=0;k<=ROWS;k++)for(let c=0;c<COLS;c++)if(H[k][c]==="1"&&!SKIP.has("h"+k+","+c))line([X0+c*CW,Y0+k*CH],[X0+(c+1)*CW,Y0+k*CH],w,"#6e4628");
+  for(let k=0;k<=COLS;k++)for(let r=0;r<ROWS;r++)if(V[k][r]==="1"&&!SKIP.has("v"+k+","+r))line([X0+k*CW,Y0+r*CH],[X0+k*CW,Y0+(r+1)*CH],w,"#6e4628");
+  for(const g of GATES){const a=G.gates[g.id];const[h,e]=gateSeg(g,(a?a.t:0)*Math.PI/2);
+    const dead=g.mount==="roof"&&!G.maze.roof;
+    line(h,e,w*1.4,dead?"#7882aa":g.type==="floor"?"#ff9620":"#3c78ff");circ(h[0],h[1],2,"#141414")}
+  const[bx,by]=[G.x,G.y];circ(bx+1.2,by-1.2,8.5,"#2a2a30");circ(bx,by,8.5,"#c1c6d0");circ(bx-3,by+3,3,"#f4f7ff")}
+
+// ---------------- panel ----------------
+const $=id=>document.getElementById(id);
+function renderCode(){$("code").innerHTML=COLOURS.map((c,i)=>`<i class="${i<G.progress?"on":""}" style="--c:${RGB[c]}"></i>`).join("")}
+function renderBtns(){$("btns").innerHTML="";for(let i=0;i<4;i++){const b=document.createElement("button");
+  b.className=G.flash[i]>0?"hit":"";b.innerHTML=`<kbd>${i+1}</kbd>Button ${i+1}`+(G.reveal?`  =  ${NAMES[G.map[i]]}`:"");b.onclick=()=>press(i);$("btns").appendChild(b)}}
+function renderStats(){const s=G.stats;$("stats").textContent=`Runs ${s.runs}   Wins ${s.wins}   Presses ${s.presses}   Drains ${s.drains}`}
+function renderLog(){$("log").innerHTML=G.log.map(l=>`<div style="color:${l[1]}">${l[0]}</div>`).join("")}
+function renderTog(){const t=$("tog");t.innerHTML="";
+  const add=(txt,fn)=>{const b=document.createElement("button");b.textContent=txt;b.onclick=()=>{fn();renderTog();renderBtns()};t.appendChild(b)};
+  add("Reveal buttons + exit: "+(G.reveal?"on":"off"),()=>G.reveal=!G.reveal);
+  add("Mapping: "+(G.fixed?"fixed":"reshuffled"),()=>G.fixed=!G.fixed);
+  add("Wobble: "+WOBN[G.wobble],()=>G.wobble=(G.wobble+1)%3);
+  add("Roof gates: "+(G.maze.roof?"work":"dead"),()=>{G.maze=new Maze(!G.maze.roof)});
+  add("New run",()=>newRun())}
+addEventListener("keydown",e=>{const k=e.key.toLowerCase();const i="1234".indexOf(k);const j="qwer".indexOf(k);
+  if(i>=0)press(i);else if(j>=0)press(j)});
+
+let last=performance.now();
+function frame(t){const dt=Math.min(.05,(t-last)/1000);last=t;update(dt);draw();requestAnimationFrame(frame)}
+newRun(true);renderTog();renderStats();renderLog();requestAnimationFrame(frame);
+</script>
