@@ -1,6 +1,6 @@
 // ===================== simulator (original 20x20 maze) =====================
 const OX = 84, OY = 52;                   // world -> canvas offset (px); scale is 1; world y is flipped so row 0 is at the bottom
-const LIFT_X0 = 885, LIFT_X1 = 925, LIFT_XC = 905, LANE_R = 868, LANE_TOP = -14, CHUTE_Y = PH + 16;
+const LIFT_X0 = PW + 30, LIFT_X1 = PW + 70, LIFT_XC = PW + 50, LANE_R = PW + 13, LANE_TOP = -14, CHUTE_Y = PH + 16;
 const RB = 8;                             // drawn ball radius (real ball is 7 mm)
 const FALL_T = .11, MOVE_T = .22, GATE_T = .15, HOLD_T = .12;
 const cxm = c => X0 + (c + .5) * CELL_W;
@@ -226,6 +226,7 @@ function update(dt) {
 
 // ===================== drawing: plate =====================
 const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+cv.width = OX + LIFT_X1 + 30; cv.height = OY + PH + 70;
 const COL = { plate: "#1e2736", wall: "#cbd5e4", red: "#e5484d", green: "#31c46b", blue: "#4c8dff", orange: "#ff9b2f", cp: "#b78cff", txt: "#8ea0bb" };
 const Py = y => PH - y;
 function gateSeg(g, th) {                  // y-up mm geometry from the description
