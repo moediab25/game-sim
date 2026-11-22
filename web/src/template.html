@@ -1,0 +1,434 @@
+<title>Trick Wall Simulator</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: the plate (canvas) on the left, control + readout panel on the right; stacks on phones. */
+:root{
+  --bg:#eef0f3; --fg:#1d222b; --muted:#5d6574; --panel:#ffffff; --line:#cdd2db;
+  --btn:#27324a; --btn-fg:#f3f5fa; --on:#2e7d4f; --accent:#c4561b;
+  --font:"Space Grotesk",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12151b; --fg:#e7eaf0; --muted:#9aa2b2; --panel:#1c212b; --line:#333a48;
+  --btn:#34456b; --btn-fg:#f3f5fa; --on:#3fae6a; --accent:#f28d4f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#12151b; --fg:#e7eaf0; --muted:#9aa2b2; --panel:#1c212b; --line:#333a48;
+  --btn:#34456b; --btn-fg:#f3f5fa; --on:#3fae6a; --accent:#f28d4f; color-scheme:dark}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px;
+  padding-block:14px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;justify-content:center;max-width:1180px;margin:0 auto}
+.stage{flex:1 1 440px;max-width:600px;min-width:0}
+canvas{display:block;width:100%;height:auto;border-radius:8px;background:#151b26;touch-action:manipulation}
+.side{flex:1 1 320px;max-width:520px;min-width:0;display:flex;flex-direction:column;gap:12px}
+h1{margin:0;font-size:1.35rem}
+.sub{color:var(--muted);font-size:.82rem;margin-top:3px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+.hud{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-family:var(--mono);font-size:.8rem}
+.hud b{color:var(--muted);font-weight:500}
+.chips{display:flex;gap:6px;align-items:center;flex-wrap:wrap;min-height:22px}
+.chip{display:inline-block;width:18px;height:18px;border-radius:50%;border:2px solid var(--line);box-sizing:border-box}
+.chip.ghost{background:transparent;opacity:.45}
+.row{display:flex;flex-wrap:wrap;gap:6px}
+button{font:inherit;font-size:.85rem;padding:7px 11px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--fg);cursor:pointer}
+button.pri{background:var(--btn);color:var(--btn-fg);border-color:transparent}
+button.on{background:var(--on);color:#fff;border-color:transparent}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.msg{font-weight:700;min-height:1.3em}
+.msg.win{color:var(--on)} .msg.bad{color:var(--accent)}
+.list{font-family:var(--mono);font-size:.74rem;line-height:1.55;max-height:190px;overflow:auto}
+.list div{display:flex;gap:8px;align-items:center;padding:1px 0}
+.list .rt{cursor:pointer;border-radius:5px;padding:3px 5px}
+.list .rt:hover,.list .rt.sel{background:color-mix(in srgb,var(--accent) 18%,transparent)}
+h2{margin:0 0 6px;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.ok{color:var(--on)} .no{color:var(--accent)}
+.help{font-size:.78rem;color:var(--muted);line-height:1.5}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono&family=Space+Grotesk:wght@500;700&display=swap">
+
+<div class="wrap">
+  <div class="stage"><canvas id="cv" width="984" height="1250" aria-label="The Trick Wall plate"></canvas></div>
+  <div class="side">
+    <div><h1>The Trick Wall</h1><div class="sub">Servo-gated gravity maze. Click a gate, flap or paddle on the plate to fire it while the ball is on that cell.</div></div>
+    <div class="card">
+      <div class="row">
+        <button class="pri" id="bDrop">Drop ball</button><button id="bReset">Reset</button>
+        <span style="flex:1"></span>
+        <span class="row" id="speed"></span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="bRoute">Show route</button><button id="bSolve">Auto-solve</button><button id="bPlay">Play solution</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="msg" id="msg">Press “Drop ball”.</div>
+      <div class="hud" style="margin-top:8px">
+        <b>Position</b><span id="hPos">-</span>
+        <b>Dots so far</b><span class="chips" id="hSeq"></span>
+        <b>Correct code</b><span class="chips" id="hCode"></span>
+        <b>Last checkpoint</b><span id="hCp">none</span>
+        <b>Run timer</b><span id="hTime">0.0 s</span>
+        <b>Actuations</b><span id="hAct">0</span>
+      </div>
+    </div>
+    <div class="card"><h2>Self-check</h2><div class="list" id="check"></div></div>
+    <div class="card"><h2>Solution</h2><div class="list" id="sol">Press Auto-solve.</div></div>
+    <div class="card"><h2>All simple routes to the exit (click to show)</h2><div class="list" id="routes"></div></div>
+    <div class="help">Plate 795 × 1200 mm, ten 3° shelves, 20 columns. Green bar = floor gate (G). Blue flap = push gate (p left, q right). Orange paddle = flipper (f throws up-left, g up-right). Red slot = drain, green slot = exit. Dashed purple box = checkpoint. Change <code>CODE</code> at the top of the script to change the dot order.</div>
+  </div>
+</div>
+
+<script>
+/*CORE*/
+
+// ===================== simulator =====================
+const VIS_G = 4000;                       // mm/s^2 for falls (slowed so a drop can be seen)
+const OX = 84, OY = 30;                   // world -> canvas offset (px); scale is 1
+const LIFT_X0 = 835, LIFT_X1 = 875, LIFT_XC = 855;
+const RB = 8;                             // drawn ball radius (real ball is 7 mm)
+const cx = c => (c + .5) * PITCH;
+const ballY = (k, x) => floorY(k, x) - RB;
+const NAMES = { G: "floor gate", p: "push left", q: "push right", f: "flipper left", g: "flipper right" };
+
+const S = {
+  ball: null, seq: [], cp: -1, acts: {}, actCount: 0, time: 0, running: false,
+  speed: 1, msg: "Press “Drop ball”.", msgKind: "", beltT: 0,
+  route: null, showRoute: false, auto: null, hover: null, flash: {},
+};
+const ROUTES = [], PLAN = [];
+let SOL = null;
+
+function resetRun() { S.seq = []; S.cp = -1; S.acts = {}; S.actCount = 0; S.time = 0; S.running = false; S.ball = null; S.auto = null; setMsg("Press “Drop ball”.", ""); }
+function setMsg(t, kind) { S.msg = t; S.msgKind = kind || ""; }
+
+// ---- ball placement / events ----
+function register(k, c) {
+  const di = dotAt(k, c);
+  if (di >= 0 && !S.seq.includes(di)) { S.seq.push(di); S.flash[di] = 1; setMsg(`${DOTS[di].name.toUpperCase()} dot registered`, ""); }
+  const pi = cpAt(k, c);
+  if (pi >= 0 && S.cp !== pi) { S.cp = pi; setMsg(`Checkpoint CP${pi + 1} reached`, ""); }
+}
+function place(k, c) {                    // ball at rest in the middle of a cell
+  S.ball = { mode: "roll", k, x: cx(c), v: 0, ci: c, reg: false, y: ballY(k, cx(c)) };
+}
+function dropBall() {
+  const keep = false;
+  resetRun(); S.running = true; place(ENTRY.k, ENTRY.c); S.ball.y -= 60;
+  S.ball.mode = "air"; S.ball.t = 0; S.ball.T = .35; S.ball.x0 = S.ball.x; S.ball.y0 = S.ball.y; S.ball.x1 = cx(ENTRY.c); S.ball.y1 = ballY(ENTRY.k, cx(ENTRY.c)); S.ball.peak = 0;
+  S.ball.land = [ENTRY.k, ENTRY.c];
+  setMsg("Ball released at S1, column 18.", "");
+}
+function startLost(why) {
+  const b = S.ball; b.mode = "lost"; b.t = 0; b.why = why; b.y0 = b.y; b.y1 = 1214;
+}
+function liftPath(x0) {
+  const t = S.cp >= 0 ? CHECKPOINTS[S.cp] : ENTRY;
+  const side = S.cp >= 0 ? t.side : "R";
+  const yp = ballY(t.k, cx(t.c));
+  const p = [[x0, 1214], [LIFT_XC, 1214]];
+  if (side === "R") p.push([LIFT_XC, yp], [cx(t.c), yp]);
+  else p.push([LIFT_XC, 8], [-26, 8], [-26, yp], [cx(t.c), yp]);
+  return { pts: p, k: t.k, c: t.c };
+}
+function plen(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return L; }
+function pointAt(pts, u) {
+  let d = u * plen(pts);
+  for (let i = 1; i < pts.length; i++) {
+    const L = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (d <= L) return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * d / L, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * d / L];
+    d -= L;
+  }
+  return pts[pts.length - 1];
+}
+
+function fireActuator(k, c, src) {
+  const ch = cellCh(k, c); if (!isActuator(ch)) return false;
+  const key = k + "," + c, a = S.acts[key];
+  if (a && a.t < ACT_WINDOW) return false;                  // still moving
+  S.acts[key] = { k, c, t: 0, used: false }; S.actCount++;
+  return true;
+}
+// >>> Replace this to change who fires the servos (control panel, automatic sequence, GPIO...). <<<
+let requestFire = (k, c, src) => fireActuator(k, c, src);
+
+function stepBall(h) {
+  const b = S.ball; if (!b) return;
+  if (b.mode === "roll") {
+    const d = DIR(b.k);
+    b.v += ACC * 1000 * d * h; b.x += b.v * h;
+    if (b.x < 0 || b.x > PW) { b.y = ballY(b.k, Math.min(PW, Math.max(0, b.x))); startLost("off"); return; }
+    const ci = Math.min(NCOL - 1, Math.max(0, Math.floor(b.x / PITCH)));
+    if (ci !== b.ci) { b.ci = ci; b.reg = false; }
+    b.y = ballY(b.k, b.x);
+    const ch = LAYOUT[b.k][ci], dx = Math.abs(b.x - cx(ci));
+    if (!b.reg && (b.x - cx(ci)) * d >= 0) { b.reg = true; register(b.k, ci); }
+    if (ch === "D" && dx < 11) { setMsg("Ball lost down a drain", "bad"); startLost("drain"); return; }
+    if (ch === "X" && dx < 11) {
+      b.mode = "exit"; b.t = 0;
+      if (seqOk(S.seq)) { S.running = false; setMsg(`WIN! Code ${CODE.join(" > ")} in ${S.time.toFixed(1)} s, ${S.actCount} actuations`, "win"); b.win = true; }
+      else { setMsg("Wrong code. Ball sent to the belt lift.", "bad"); b.win = false; }
+      return;
+    }
+    const a = S.acts[b.k + "," + ci];
+    if (a && !a.used && a.t < ACT_WINDOW) {
+      if (ch === "G" && dx < 13) { a.used = true; b.mode = "fall"; b.vy = 0; b.fx = b.x; return; }
+      if ((ch === "p" || ch === "q") && dx < 16) {
+        a.used = true; const r = resolve(b.k, ci, true);
+        if (r.kind === "lost") { startLost("off"); return; }
+        Object.assign(b, { mode: "air", t: 0, T: .4, x0: b.x, y0: b.y, x1: cx(r.c), y1: ballY(r.k, cx(r.c)), peak: 20, land: [r.k, r.c] }); return;
+      }
+      if ((ch === "f" || ch === "g") && dx < 16) {
+        a.used = true; const r = resolve(b.k, ci, true);
+        if (r.kind === "throw") Object.assign(b, { mode: "air", t: 0, T: .9, x0: b.x, y0: b.y, x1: cx(r.c), y1: ballY(r.k, cx(r.c)), peak: 70, land: [r.k, r.c] });
+        else setMsg("Flipper had no room: ball fell back", "bad");
+        return;
+      }
+    }
+  } else if (b.mode === "air") {
+    b.t += h; const u = Math.min(1, b.t / b.T);
+    b.x = b.x0 + (b.x1 - b.x0) * u; b.y = b.y0 + (b.y1 - b.y0) * u - 4 * b.peak * u * (1 - u);
+    if (u >= 1) { place(b.land[0], b.land[1]); }
+  } else if (b.mode === "fall") {
+    b.vy += VIS_G * h; b.y += b.vy * h; b.x = b.fx;
+    const ty = ballY(b.k + 1, b.x);
+    if (b.y >= ty) { const c = Math.floor(b.x / PITCH); place(b.k + 1, c); }
+  } else if (b.mode === "exit") {
+    b.t += h; b.y += 260 * h;
+    if (b.t > .45) { if (b.win) { S.ball = null; } else { b.y = 1214; b.mode = "lost"; b.t = 0; b.y0 = 1214; b.y1 = 1214; } }
+  } else if (b.mode === "lost") {
+    b.t += h; const u = Math.min(1, b.t / .5);
+    b.y = b.y0 + (b.y1 - b.y0) * u * u;
+    if (u >= 1) { const lp = liftPath(b.x); Object.assign(b, { mode: "lift", t: 0, T: LIFT_DELAY, path: lp }); }
+  } else if (b.mode === "lift") {
+    b.t += h; S.beltT += h;
+    const u = Math.min(1, b.t / b.T), p = pointAt(b.path.pts, u); b.x = p[0]; b.y = p[1];
+    if (u >= 1) { place(b.path.k, b.path.c); register(b.path.k, b.path.c); setMsg("Ball re-entered at " + (S.cp >= 0 ? "CP" + (S.cp + 1) : "the entry"), ""); }
+  }
+}
+
+function autoDrive() {
+  const A = S.auto; if (!A || !S.ball || S.ball.mode !== "roll") return;
+  const t = PLAN[A.i]; if (!t) { S.auto = null; return; }
+  const b = S.ball; if (b.k !== t.k) return;
+  const dist = (cx(t.c) - b.x) * DIR(b.k);
+  if (dist < -10) { setMsg("Auto-play lost sync with the plan", "bad"); S.auto = null; return; }
+  if (dist <= PITCH) { requestFire(t.k, t.c, "auto"); A.i++; }
+}
+
+function update(dt) {
+  dt *= S.speed;
+  for (const key in S.acts) { S.acts[key].t += dt; if (S.acts[key].t > ACT_WINDOW + .05) delete S.acts[key]; }
+  for (const k in S.flash) S.flash[k] = Math.max(0, S.flash[k] - dt * 1.2);
+  if (S.running) S.time += dt;
+  let rem = dt;
+  while (rem > 1e-9) { const h = Math.min(rem, .004); autoDrive(); stepBall(h); rem -= h; }
+}
+
+// ===================== drawing =====================
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+const COL = { plate: "#1e2736", shelf: "#cbd5e4", dead: "#3a4458", red: "#e5484d", green: "#31c46b", blue: "#4c8dff", orange: "#ff9b2f", cp: "#b78cff", txt: "#8ea0bb" };
+const swing = t => (t < 0 || t > ACT_WINDOW) ? 0 : Math.sin(Math.PI * t / ACT_WINDOW);
+const openF = t => t > ACT_WINDOW ? 0 : Math.min(1, t / .1, (ACT_WINDOW - t) / .1);
+function actOf(k, c) { return S.acts[k + "," + c]; }
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = "#151b26"; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.translate(OX, OY);
+  // plate
+  ctx.fillStyle = COL.plate; ctx.fillRect(0, 0, PW, PH);
+  ctx.strokeStyle = "#3b475d"; ctx.lineWidth = 2; ctx.strokeRect(0, 0, PW, PH);
+  // column ticks (faint)
+  ctx.strokeStyle = "rgba(255,255,255,.04)"; ctx.lineWidth = 1;
+  for (let c = 0; c <= NCOL; c++) { ctx.beginPath(); ctx.moveTo(c * PITCH, 0); ctx.lineTo(c * PITCH, PH); ctx.stroke(); }
+  drawLift(); drawChute();
+  for (let k = 0; k < NSH; k++) drawShelf(k);
+  if (S.showRoute && S.route) drawRoute(S.route);
+  drawBall();
+}
+
+function drawShelf(k) {
+  const d = DIR(k), y0 = floorY(k, 0), y1 = floorY(k, PW);
+  // label
+  ctx.fillStyle = COL.txt; ctx.font = "bold 18px system-ui,sans-serif"; ctx.textAlign = "right"; ctx.textBaseline = "middle";
+  ctx.fillText(`S${k + 1} ${d < 0 ? "←" : "→"}`, -34, (y0 + y1) / 2);
+  // floor
+  ctx.strokeStyle = COL.shelf; ctx.lineWidth = 5; ctx.lineCap = "butt";
+  ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(PW, y1); ctx.stroke();
+  for (let c = 0; c < NCOL; c++) {
+    const ch = LAYOUT[k][c], x = cx(c), y = floorY(k, x);
+    if (ch === ".") { ctx.fillStyle = COL.dead; ctx.fillRect(c * PITCH + 2, y - 34, PITCH - 4, 38); ctx.strokeStyle = "#566179"; ctx.lineWidth = 1; ctx.strokeRect(c * PITCH + 2, y - 34, PITCH - 4, 38); }
+    else if (ch === "D" || ch === "X") {
+      const col = ch === "D" ? COL.red : COL.green;
+      ctx.fillStyle = COL.plate; ctx.fillRect(x - 15, y - 4, 30, 11);
+      ctx.fillStyle = col; ctx.globalAlpha = .85; ctx.fillRect(x - 15, y - 2, 30, 7); ctx.globalAlpha = 1;
+      if (ch === "X") { ctx.fillStyle = "#fff"; ctx.font = "bold 12px system-ui"; ctx.textAlign = "center"; ctx.fillText("EXIT", x, y - 16); }
+    } else if (ch === "G") drawGate(k, c, x, y, d);
+    else if (ch === "p" || ch === "q") drawPush(k, c, x, y, ch === "p" ? -1 : 1);
+    else if (ch === "f" || ch === "g") drawFlip(k, c, x, y, ch === "f" ? -1 : 1);
+    if (S.hover && S.hover.k === k && S.hover.c === c) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(c * PITCH + 1, y - 66, PITCH - 2, 82, 6); ctx.stroke(); }
+    const di = dotAt(k, c);
+    if (di >= 0) {
+      const dd = DOTS[di], reg = S.seq.includes(di), fl = S.flash[di] || 0;
+      ctx.beginPath(); ctx.arc(x, y - 1, 9 + fl * 5, 0, 7); ctx.fillStyle = dd.rgb; ctx.fill();
+      ctx.lineWidth = reg ? 3 : 1.5; ctx.strokeStyle = reg ? "#fff" : "rgba(255,255,255,.55)"; ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.font = "bold 10px system-ui"; ctx.textAlign = "center"; ctx.fillText("D" + (CODE.indexOf(dd.name) + 1), x, y + 20);
+    }
+    const pi = cpAt(k, c);
+    if (pi >= 0) {
+      ctx.setLineDash([4, 3]); ctx.strokeStyle = S.cp === pi ? "#e2cdff" : COL.cp; ctx.lineWidth = S.cp === pi ? 3 : 1.6;
+      ctx.strokeRect(c * PITCH + 2, y - 40, PITCH - 4, 56); ctx.setLineDash([]);
+      ctx.fillStyle = COL.cp; ctx.font = "bold 10px system-ui"; ctx.textAlign = "center"; ctx.fillText("CP" + (pi + 1), x, y - 46);
+      const side = CHECKPOINTS[pi].side;                         // feed port
+      ctx.fillStyle = COL.cp; ctx.fillRect(side === "L" ? -9 : PW + 1, floorY(k, side === "L" ? 0 : PW) - 14, 8, 10);
+    }
+  }
+}
+function drawGate(k, c, x, y, d) {
+  const a = actOf(k, c), o = a ? openF(a.t) : 0, th = o * Math.PI * .47;
+  const hx = x + d * -1 * 15 * -1, hy = y;                       // hinge on the downhill side
+  const ex = hx - d * 30 * Math.cos(th) * -1 * -1, ey = hy + 30 * Math.sin(th);
+  ctx.strokeStyle = COL.green; ctx.lineWidth = 5; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(x + d * 15, y); ctx.lineTo(x + d * 15 - d * 30 * Math.cos(th), y + 30 * Math.sin(th)); ctx.stroke();
+  ctx.fillStyle = "#0d3b22"; ctx.beginPath(); ctx.arc(x + d * 15, y, 2.5, 0, 7); ctx.fill(); ctx.lineCap = "butt";
+}
+function drawPush(k, c, x, y, dp) {
+  const a = actOf(k, c), s = a ? swing(a.t) : 0, phi = s * 1.25, py = y - 55;
+  ctx.strokeStyle = COL.blue; ctx.lineWidth = 4; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x + dp * 48 * Math.sin(phi), py + 48 * Math.cos(phi)); ctx.stroke(); ctx.lineCap = "butt";
+  ctx.fillStyle = "#cfe0ff"; ctx.beginPath(); ctx.arc(x, py, 3.5, 0, 7); ctx.fill();
+  ctx.fillStyle = COL.blue; ctx.font = "bold 13px system-ui"; ctx.textAlign = "center"; ctx.fillText(dp < 0 ? "◀" : "▶", x, py - 8);
+}
+function drawFlip(k, c, x, y, dt) {
+  const a = actOf(k, c), s = a ? swing(a.t) : 0, psi = s * 1.3;
+  const px_ = x - dt * 18, py_ = y - 4;
+  ctx.strokeStyle = COL.orange; ctx.lineWidth = 5; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(px_, py_); ctx.lineTo(px_ + dt * 36 * Math.cos(psi), py_ - 36 * Math.sin(psi)); ctx.stroke(); ctx.lineCap = "butt";
+  ctx.fillStyle = "#5a3300"; ctx.beginPath(); ctx.arc(px_, py_, 3, 0, 7); ctx.fill();
+  ctx.fillStyle = COL.orange; ctx.font = "bold 12px system-ui"; ctx.textAlign = "center"; ctx.fillText(dt < 0 ? "↖" : "↗", x, y - 20);
+}
+function drawLift() {
+  ctx.fillStyle = "#222c3d"; ctx.fillRect(LIFT_X0, -10, LIFT_X1 - LIFT_X0, PH + 40);
+  ctx.strokeStyle = "#3d4a63"; ctx.lineWidth = 1; ctx.strokeRect(LIFT_X0, -10, LIFT_X1 - LIFT_X0, PH + 40);
+  ctx.strokeStyle = "#566384"; ctx.lineWidth = 2;
+  const off = (S.beltT * 40) % 40;
+  for (let y = PH + 20 - off; y > -5; y -= 40) { ctx.beginPath(); ctx.moveTo(LIFT_X0 + 6, y + 8); ctx.lineTo(LIFT_XC, y); ctx.lineTo(LIFT_X1 - 6, y + 8); ctx.stroke(); }
+  ctx.fillStyle = COL.txt; ctx.font = "bold 12px system-ui"; ctx.textAlign = "center";
+  ctx.save(); ctx.translate(LIFT_XC + 4, PH / 2); ctx.rotate(-Math.PI / 2); ctx.fillText("BELT LIFT", 0, 0); ctx.restore();
+  ctx.fillStyle = "#6f7fa3"; ctx.beginPath(); ctx.arc(LIFT_XC, 8, 7, 0, 7); ctx.fill();    // diverter
+  ctx.fillStyle = COL.txt; ctx.fillText("diverter", LIFT_XC, -14);
+  ctx.fillText("sump", LIFT_XC, PH + 28);
+}
+function drawChute() {
+  ctx.fillStyle = "#2b3447"; ctx.fillRect(0, PH + 4, LIFT_X0, 20);
+  ctx.fillStyle = COL.txt; ctx.font = "11px system-ui"; ctx.textAlign = "left"; ctx.fillText("collector chute →", 10, PH + 14);
+}
+function drawBall() {
+  const b = S.ball; if (!b) return;
+  const alpha = (b.mode === "lost" || b.mode === "exit") ? .6 : 1;
+  ctx.globalAlpha = alpha;
+  ctx.beginPath(); ctx.arc(b.x + 1.5, b.y + 1.5, RB, 0, 7); ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.fill();
+  const g = ctx.createRadialGradient(b.x - 3, b.y - 3, 1, b.x, b.y, RB);
+  g.addColorStop(0, "#ffffff"); g.addColorStop(.5, "#b9c0cc"); g.addColorStop(1, "#6d7686");
+  ctx.beginPath(); ctx.arc(b.x, b.y, RB, 0, 7); ctx.fillStyle = g; ctx.fill();
+  ctx.globalAlpha = 1;
+}
+function drawRoute(r) {
+  const col = r.ok ? "#4ff08a" : "#ffb04f";
+  const pts = r.trail.map(t => [cx(t.c), ballY(t.k, cx(t.c)) - 2]);
+  ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.globalAlpha = .85; ctx.setLineDash([7, 4]);
+  ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke(); ctx.setLineDash([]);
+  let n = 0;
+  r.trail.forEach((t, i) => {
+    if (t.act !== "fire") return; n++;
+    const p = pts[i]; ctx.beginPath(); ctx.arc(p[0], p[1] - 22, 9, 0, 7); ctx.fillStyle = col; ctx.fill();
+    ctx.fillStyle = "#06210f"; ctx.font = "bold 10px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(n, p[0], p[1] - 22);
+  });
+  ctx.globalAlpha = 1;
+}
+
+// ===================== UI =====================
+const $ = id => document.getElementById(id);
+const chip = (rgb, ghost) => `<i class="chip${ghost ? " ghost" : ""}" style="background:${rgb}"></i>`;
+const dotRgb = n => DOTS.find(d => d.name === n).rgb;
+function hud() {
+  const b = S.ball;
+  let pos = "-";
+  if (b && (b.mode === "roll" || b.mode === "air" || b.mode === "fall")) {
+    const k = b.mode === "air" ? b.land[0] : b.k, c = Math.min(NCOL - 1, Math.max(0, Math.floor((b.mode === "air" ? cx(b.land[1]) : b.x) / PITCH)));
+    pos = `S${k + 1}, col ${c}  (${b.mode})`;
+  } else if (b) pos = b.mode;
+  $("hPos").textContent = pos;
+  $("hSeq").innerHTML = S.seq.length ? S.seq.map(i => chip(DOTS[i].rgb)).join("") : "<span style='color:var(--muted)'>none</span>";
+  $("hCp").textContent = S.cp >= 0 ? `CP${S.cp + 1} (S${CHECKPOINTS[S.cp].k + 1}, col ${CHECKPOINTS[S.cp].c})` : "none (entry)";
+  $("hTime").textContent = S.time.toFixed(1) + " s";
+  $("hAct").textContent = S.actCount;
+  const m = $("msg"); m.textContent = S.msg; m.className = "msg " + S.msgKind;
+}
+function describe(t) { const ch = cellCh(t.k, t.c); return `S${t.k + 1} col ${t.c} ${ch} (${NAMES[ch]})`; }
+function renderSolution(sol) {
+  const fires = PLAN;
+  $("sol").innerHTML = (sol ? `<div style="display:block"><b>Fewest actuations: ${sol.fires}</b> (${sol.steps} cell steps${sol.path.some(p => p.via === "lift") ? ", the solver's cheapest run uses a belt-lift loop" : ""}). Play uses the single correct-order route, listed here:</div>` : "<div class='no'>No winning run found.</div>")
+    + fires.map((t, i) => `<div><span style="width:1.6em;color:var(--muted)">${i + 1}.</span>${describe(t)}</div>`).join("");
+}
+function renderRoutes() {
+  $("routes").innerHTML = ROUTES.map((r, i) => {
+    const fires = r.trail.filter(t => t.act === "fire").length;
+    return `<div class="rt" data-i="${i}"><span class="${r.ok ? "ok" : "no"}" style="width:5.5em">${r.ok ? "CORRECT" : "wrong"}</span>`
+      + `<span class="chips">${r.seq.length ? r.seq.map(j => chip(DOTS[j].rgb)).join("") : "no dots"}</span><span style="margin-left:auto">${fires} act.</span></div>`;
+  }).join("");
+  document.querySelectorAll(".rt").forEach(el => el.onclick = () => showRoute(+el.dataset.i));
+}
+function showRoute(i) {
+  S.route = ROUTES[i]; S.showRoute = true; $("bRoute").classList.add("on");
+  document.querySelectorAll(".rt").forEach(el => el.classList.toggle("sel", +el.dataset.i === i));
+}
+function canvasPos(ev) {
+  const r = cv.getBoundingClientRect();
+  return [(ev.clientX - r.left) / r.width * cv.width - OX, (ev.clientY - r.top) / r.height * cv.height - OY];
+}
+function hitActuator(wx, wy) {
+  let best = null, bd = 1e9;
+  for (let k = 0; k < NSH; k++) for (let c = 0; c < NCOL; c++) {
+    if (!isActuator(LAYOUT[k][c])) continue;
+    const x = cx(c), y = floorY(k, x);
+    if (wx >= c * PITCH - 3 && wx <= (c + 1) * PITCH + 3 && wy >= y - 72 && wy <= y + 20) {
+      const d = Math.abs(wx - x) + Math.abs(wy - (y - 25)); if (d < bd) { bd = d; best = { k, c }; }
+    }
+  }
+  return best;
+}
+cv.addEventListener("pointermove", ev => { const p = canvasPos(ev); S.hover = hitActuator(p[0], p[1]); cv.style.cursor = S.hover ? "pointer" : "default"; });
+cv.addEventListener("pointerleave", () => { S.hover = null; });
+cv.addEventListener("click", ev => { const p = canvasPos(ev), h = hitActuator(p[0], p[1]); if (h) requestFire(h.k, h.c, "click"); });
+addEventListener("keydown", ev => { if (ev.code === "Space" && ev.target === document.body) { ev.preventDefault(); dropBall(); } });
+$("bDrop").onclick = dropBall;
+$("bReset").onclick = () => { resetRun(); };
+$("bRoute").onclick = () => { S.showRoute = !S.showRoute; if (S.showRoute && !S.route) showRoute(ROUTES.findIndex(r => r.ok)); $("bRoute").classList.toggle("on", S.showRoute); };
+$("bSolve").onclick = () => { SOL = solve(); renderSolution(SOL); showRoute(ROUTES.findIndex(r => r.ok)); };
+$("bPlay").onclick = () => {
+  if (!SOL) { SOL = solve(); renderSolution(SOL); }
+  dropBall(); S.auto = { i: 0 }; setMsg("Auto-play: firing the planned actuators", "");
+};
+[0.5, 1, 2, 4].forEach(v => { const b = document.createElement("button"); b.textContent = v + "×"; b.onclick = () => { S.speed = v; [...$("speed").children].forEach(x => x.classList.toggle("on", x === b)); }; if (v === 1) b.classList.add("on"); $("speed").appendChild(b); });
+
+// ---- start up: self-check ----
+(function init() {
+  const R = selfCheck();
+  R.paths.forEach(p => ROUTES.push(p));
+  const good = ROUTES.find(r => r.ok);
+  if (good) good.trail.filter(t => t.act === "fire").forEach(t => PLAN.push({ k: t.k, c: t.c }));
+  SOL = R.sol;
+  console.log("[Trick Wall] self-check " + (R.ok ? "PASSED" : "FAILED") + "\n" + R.log.join("\n"));
+  $("check").innerHTML = `<div class="${R.ok ? "ok" : "no"}"><b>${R.ok ? "All checks passed" : "A check failed"}</b></div>` + R.log.map(l => `<div>${l}</div>`).join("");
+  $("hCode").innerHTML = CODE.map(n => chip(dotRgb(n))).join("");
+  renderRoutes(); renderSolution(SOL);
+  window.TW = { S, selfCheck, solve, allPaths, requestFire: (k, c) => requestFire(k, c, "api"), dropBall };
+})();
+
+let last = performance.now();
+function frame(t) { const dt = Math.min(.05, (t - last) / 1000); last = t; update(dt); draw(); hud(); requestAnimationFrame(frame); }
+requestAnimationFrame(frame);
+</script>
