@@ -26,3 +26,8 @@ Keys: `H` reveal mapping + exit, `T` fixed mapping (practice), `O` wobble off/no
   ball slowly wobbles one cell sideways, and a falling ball can be jostled sideways (`DRIFT_P` in `sim.py`).
 - **Gate speed:** SG90-like ~0.15 s to open; gates close again after the ball passes.
 - **Wrong colour order** resets the code; collecting the right dot while passing a checkpoint is kept after a lift.
+
+## Trick Wall simulators (single-file HTML, no libraries)
+- `web/trickwall.html` - sloped-shelf maze (10 shelves, 30 servos), touch-screen riddles, 4 buttons, belt-lift return.
+- `web/trickwall20.html` - the original 20x20 maze in the same simulator (push left / push right / open floor / lift).
+- `web/src/` holds the sources (`touch.js` shared, `core.js` / `core20.js` maze logic); run `python3 web/build.py` to rebuild both files.
