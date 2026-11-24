@@ -7,5 +7,8 @@ for tpl, core, out in (("template.html", "core.js", "trickwall.html"), ("templat
     if not f.exists():
         continue
     html = f.read_text().replace("/*CORE*/", touch + "\n" + (d / "src" / core).read_text())
+    sim = d / "src/sim20.js"
+    if "/*SIM*/" in html:
+        html = html.replace("/*SIM*/", sim.read_text())
     (d / out).write_text(html)
     print("wrote", out, len(html), "bytes")

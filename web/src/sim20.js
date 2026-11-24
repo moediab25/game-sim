@@ -16,7 +16,7 @@ const S = {
   speed: 1, msg: "Press “Arm”.", msgKind: "", beltT: 0, route: null, showRoute: false, auto: null, hover: null, flash: {},
   map: [0, 1, 2, 3], needle: 0, runNo: 0, unl: [false, false, false, false], riddle: null,
   strokes: [], drawing: false, lastDraw: 0, peek: null, peeksLeft: PEEKS_PER_RUN, led: [0, 0, 0, 0], ledCol: ["", "", "", ""], btnHit: [0, 0, 0, 0],
-  debug: false, skip: false, compass: false, sound: true, reveal: false, tsNote: "", gates: {}, forceQ: [], maze: new Maze(false), wobble: 1,
+  debug: false, skip: false, compass: false, sound: true, reveal: false, tsNote: "", cap1: "", finger: null, demo: false, aim: -1, gates: {}, forceQ: [], maze: new Maze(false), wobble: 1,
 };
 const WOB = { 0: null, 1: [2, 4], 2: [.8, 1.8] }, WOBN = ["off", "normal", "wild"];
 let PLAN = [];
@@ -133,7 +133,7 @@ function doLift(why) {                                    // lift button: the ba
 }
 // A physical button press. pos = 0 top, 1 right, 2 bottom, 3 left.
 function pressButton(pos, src) {
-  S.btnHit[pos] = .15;
+  S.btnHit[pos] = S.demo ? .8 : .15;
   if (S.state === "READY") { releaseBall(); return; }
   if (S.state !== "RUN") { setLed(pos, "r"); buzzBad(); return; }
   const b = S.ball; if (!b || b.mode !== "rest") return;     // ball is moving: the press is ignored
@@ -199,16 +199,29 @@ function stepBall(dt) {
 // ---- assisted auto-play: follow the solver's plan with the lucky rolls it needs ----
 function autoDrive() {
   const A = S.auto, b = S.ball; if (!A || S.state !== "RUN" || !b || b.mode !== "rest") return;
+  if (S.demo && A.hold && performance.now() < A.hold) return;           // demo: give the viewer time to read
   let st = A.steps[A.i]; if (!st) { S.auto = null; return; }
   if (st.cell[0] !== b.c || st.cell[1] !== b.r) {                 // out of step: re-plan from where the ball is
     const plan = solveFrom(S.maze, { c: b.c, r: b.r, prog: S.prog, cp: S.cp });
     if (!plan) { setMsg("Auto-play: no plan from here", "bad"); S.auto = null; return; }
-    A.steps = plan; A.i = 0; st = plan[0]; log("auto-play re-planned: " + plan.length + " steps");
+    A.steps = plan; A.i = 0; st = plan[0]; A.ann = false; log("auto-play re-planned: " + plan.length + " steps");
   }
+  const wait = st.act === "WOBBLE", kind = ["LEFT", "RIGHT", "FLOOR", "LIFT"].indexOf(st.act), pos = wait ? -1 : S.map.indexOf(kind);
+  const g = wait ? null : (S.maze.slots[b.c + "," + b.r] || {})[st.act === "FLOOR" ? "floor" : st.act === "LEFT" ? "L" : "R"];
+  if (S.demo && !A.ann) {                                           // announce first, act after a pause
+    A.ann = true; A.hold = performance.now() + (wait ? 1100 : 1900); S.aim = pos;
+    S.cap1 = wait ? `Step ${A.i + 1}/${A.steps.length}: no press needed. The ball is at col ${b.c}, row ${b.r} and rolls sideways by itself.`
+      : `Step ${A.i + 1}/${A.steps.length}: ball is at col ${b.c}, row ${b.r}. PLAYER is about to press button ${pos + 1} [${BUTTON_SYMBOLS[pos]}] = ${KINDS[kind]}` + (g ? `, which moves gate ${g.id}.` : ", which lifts the ball back to the last checkpoint.");
+    return;
+  }
+  A.ann = false; S.aim = -1;
   S.forceQ = [[1, st.path, st.term]]; if (st.lift) S.forceQ.push([1, st.lift.path, "rest"]);
   A.i++;
-  if (st.act === "WOBBLE") { S.btnHit[0] = 0; doWobble(); }
-  else pressButton(S.map.indexOf(["LEFT", "RIGHT", "FLOOR", "LIFT"].indexOf(st.act)), "auto");
+  if (wait) { if (!S.demo) S.cap1 = `Step ${A.i}/${A.steps.length}: no press. Waits while the ball rolls sideways by itself at col ${b.c}, row ${b.r}.`; doWobble(); }
+  else {
+    S.cap1 = `Step ${A.i}/${A.steps.length}: PRESSED button ${pos + 1} [${BUTTON_SYMBOLS[pos]}] = ${KINDS[kind]}. Ball at col ${b.c}, row ${b.r}` + (g ? `, so gate ${g.id} moves.` : ", so the ball is lifted back to the last checkpoint.") + (st.lift ? " The ball then drops down a drain." : "");
+    log("PLAYER: " + S.cap1); pressButton(pos, "auto");
+  }
 }
 
 function update(dt) {
@@ -324,7 +337,8 @@ function symbolPath(c, shape, x, y, s) {
   else { c.moveTo(x - s, y); c.lineTo(x + s, y); c.moveTo(x, y - s); c.lineTo(x, y + s); }
 }
 function wrap(c, text, x, y, w, lh) { const words = text.split(" "); let line = ""; for (const wd of words) { const t = line + wd + " "; if (c.measureText(t).width > w && line) { c.fillText(line, x, y); line = wd + " "; y += lh; } else line = t; } c.fillText(line, x, y); return y + lh; }
-function drawTouch() {
+function drawTouch() { drawTouchInner(); const f = S.finger; if (f) { tc.save(); tc.fillStyle = "rgba(255,255,255,.28)"; tc.strokeStyle = "#fff"; tc.lineWidth = 3; tc.beginPath(); tc.arc(f.x, f.y, f.down ? 13 : 20, 0, 7); tc.fill(); tc.stroke(); tc.restore(); } }
+function drawTouchInner() {
   const W = tsv.width, H = tsv.height; tc.setTransform(1, 0, 0, 1, 0, 0); tc.fillStyle = "#0f141c"; tc.fillRect(0, 0, W, H);
   tc.textAlign = "center"; tc.textBaseline = "alphabetic"; tc.lineCap = "round"; tc.lineJoin = "round";
   const head = (t, col) => { tc.fillStyle = col || "#8ea0bb"; tc.font = "bold 15px system-ui"; tc.fillText(t, W / 2, 24); };
@@ -386,9 +400,10 @@ function hud() {
   const m = $("msg"); m.textContent = S.msg; m.className = "msg " + S.msgKind; const un = S.state === "READY" || S.state === "RUN";
   for (let pos = 0; pos < 4; pos++) { const el = $("pb" + pos), led = el.querySelector(".led"), sym = el.querySelector(".sym");
     const html = S.unl[pos] ? symSvg(BUTTON_SYMBOLS[pos]) : "<span style='font-weight:700;opacity:.5'>?</span>"; if (sym.dataset.h !== html) { sym.innerHTML = html; sym.dataset.h = html; }
-    led.className = "led " + (S.led[pos] > 0 ? S.ledCol[pos] : ""); el.classList.toggle("hit", S.btnHit[pos] > 0); }
+    led.className = "led " + (S.led[pos] > 0 ? S.ledCol[pos] : ""); el.classList.toggle("hit", S.btnHit[pos] > 0); el.classList.toggle("aim", S.aim === pos && S.btnHit[pos] <= 0); }
   $("bPeek").disabled = !un || S.peeksLeft <= 0; $("peeks").textContent = un ? `${S.peeksLeft} peek(s) left` : ""; $("padMid").textContent = needleVisible() ? "needle → " + POS_NAMES[S.needle] : "4 buttons";
   $("bOut").disabled = S.state !== "WIN";
+  $("cap1").textContent = S.cap1 || "-"; $("cap2").textContent = S.msg; $("capState").textContent = S.state; $("capDots").textContent = S.prog + "/4"; $("capPress").textContent = S.actCount;
 }
 function renderSolution() {
   if (!PLAN.length) { $("sol").innerHTML = "<div class='no'>No winning plan found.</div>"; return; }
@@ -428,13 +443,55 @@ $("tRoof").onchange = e => { S.maze = new Maze(e.target.checked); log("roof gate
 $("bWob").onclick = () => { S.wobble = (S.wobble + 1) % 3; $("bWob").textContent = "Rolling: " + WOBN[S.wobble]; };
 [0.5, 1, 2, 4].forEach(v => { const b = document.createElement("button"); b.textContent = v + "×"; b.onclick = () => { S.speed = v; [...$("speed").children].forEach(x => x.classList.toggle("on", x === b)); }; if (v === 1) b.classList.add("on"); $("speed").appendChild(b); });
 
+// ---- scripted demo: a player solves the riddles, then plays the maze; captions say what is pressed ----
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const waitFor = async (f, ms) => { const t0 = performance.now(); while (!f() && performance.now() - t0 < ms) await sleep(60); };
+function demoStrokes(shape) {
+  const cx = 260, cy = 235, R = 58, lerp = (a, b, n) => Array.from({ length: n }, (_, i) => [a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n]);
+  const wob = (pts, k = 2) => pts.map((p, i) => [p[0] + Math.sin(i * 1.7) * k, p[1] + Math.cos(i * 1.3) * k]);
+  if (shape === "triangle") { const v = [[cx, cy - R], [cx + R, cy + R * .85], [cx - R, cy + R * .85], [cx, cy - R]]; return [wob([].concat(lerp(v[0], v[1], 14), lerp(v[1], v[2], 14), lerp(v[2], v[3], 14), [v[3]]))]; }
+  if (shape === "square") { const v = [[cx - R, cy - R], [cx + R, cy - R], [cx + R, cy + R], [cx - R, cy + R], [cx - R, cy - R]]; return [wob([].concat(lerp(v[0], v[1], 12), lerp(v[1], v[2], 12), lerp(v[2], v[3], 12), lerp(v[3], v[4], 12), [v[4]]))]; }
+  if (shape === "circle") return [wob(Array.from({ length: 56 }, (_, i) => [cx + R * Math.cos(-1.57 + i / 54 * 6.283), cy + R * Math.sin(-1.57 + i / 54 * 6.283)]), 1.5)];
+  return [wob(lerp([cx - R, cy], [cx + R, cy], 22).concat([[cx + R, cy]])), wob(lerp([cx, cy - R], [cx, cy + R], 22).concat([[cx, cy + R]]))];
+}
+async function drawWithFinger(shape) {
+  for (const st of demoStrokes(shape)) {
+    S.finger = { x: st[0][0], y: st[0][1] - 30, down: false }; await sleep(350);
+    S.strokes.push([]); S.drawing = true; S.finger.down = true;
+    for (const p of st) { S.strokes[S.strokes.length - 1].push(p); S.finger.x = p[0]; S.finger.y = p[1]; S.lastDraw = performance.now(); await sleep(22); }
+    S.drawing = false; S.finger.down = false; S.lastDraw = performance.now(); await sleep(300);
+  }
+}
+async function demo() {
+  S.demo = true; document.body.classList.add("demo"); S.sound = false; S.speed = 1; hardReset(); window.__demoDone = false;
+  S.cap1 = "The prop is idle. The touch screen waits for the previous puzzle to finish (TER02_SOLVED)."; await sleep(3000);
+  S.cap1 = "Previous puzzle solved: the prop is armed. A riddle appears on the touch screen."; arm(); await sleep(2200);
+  let n = 0;
+  while (S.state === "UNLOCK" && S.riddle) {
+    const rd = S.riddle; n++;
+    S.cap1 = `Riddle ${n} of 4: “${rd.text}” The player draws a ${rd.shape.toUpperCase()} with a finger.`; await sleep(3200);
+    await drawWithFinger(rd.shape);
+    await waitFor(() => S.state !== "UNLOCK" || S.riddle !== rd, 7000); S.finger = null;
+    S.cap1 = S.unl[rd.btn] ? `Drawing recognised. Button ${rd.btn + 1} (${rd.shape}) is unlocked.` : "Not recognised, the player tries again."; await sleep(1800);
+  }
+  S.cap1 = "All four symbols unlocked. The PEEK screen shows what each button does for 5 s: " + [0, 1, 2, 3].map(p => `${BUTTON_SYMBOLS[p]} = ${KINDS[S.map[p]]}`).join(", ") + "."; await sleep(6500);
+  S.cap1 = "The player presses button 1 to release the ball. Four buttons, four hidden actions."; await sleep(2500);
+  S.speed = 2; pressButton(0, "player");
+  S.auto = { steps: (PLAN.length ? PLAN : solveFrom(S.maze) || []).slice(), i: 0 };
+  await waitFor(() => S.state === "WIN", 400000);
+  S.speed = 1; S.cap1 = `Code revealed on the touch screen: ${CODE.join(" > ")}. TER06_SOLVED is sent to the next puzzle. The button mapping reshuffles for the next player.`;
+  await sleep(7000); window.__demoDone = true;
+}
+
 (function init() {
   const R = selfCheck(); buildPad(); reshuffle();
   console.log("[Trick Wall 20x20] self-test " + (R.ok ? "PASSED" : "FAILED") + "\n" + R.log.join("\n"));
   $("check").innerHTML = `<div class="${R.ok ? "ok" : "no"}"><b>${R.ok ? "All checks passed" : "A check failed"}</b></div>` + R.log.map(l => `<div style="display:block">${l}</div>`).join("");
   $("hCode").innerHTML = CODE.map(n => chip(dotRgb(n))).join(""); PLAN = R.sol || []; S.route = planRoute(); renderSolution();
-  window.TW = { S, selfCheck, solveFrom, pressButton, arm, releaseBall, hardReset, Maze };
+  window.TW = { demo, S, selfCheck, solveFrom, pressButton, arm, releaseBall, hardReset, Maze };
 })();
+$("bDemo").onclick = demo;
 let last = performance.now();
 function frame(t) { const dt = Math.min(.05, (t - last) / 1000); last = t; update(dt); draw(); drawTouch(); hud(); requestAnimationFrame(frame); }
 requestAnimationFrame(frame);
+if (location.hash === "#demo") setTimeout(demo, 800);
